@@ -22,7 +22,7 @@ export default defineComponent({
         import('@arcgis/core/geometry/geometryEngine')
       ]);
 
-      // Inicie o mapa com os módulos importados
+      // Inicia o mapa com os módulos importados
       initMap(Map, MapView, FeatureLayer, Legend, geometryEngine);
     });
 
@@ -137,7 +137,7 @@ export default defineComponent({
           visualVariables: [
             {
               type: 'color',
-              field: 'cameraCount',  // Verifique se o campo é `cameraCount`
+              field: 'cameraCount',
               stops: [
                 { value: 0, color: '#f2f0f7', label: '0' },
                 { value: 1, color: '#cbc9e2', label: '1' },
