@@ -14,5 +14,15 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['@arcgis/core']
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'arcgis': ['@arcgis/core']
+        }
+      }
+    },
+    chunkSizeWarningLimit: 1000  // Altera o limite para evitar warnings, caso queira
   }
 });
