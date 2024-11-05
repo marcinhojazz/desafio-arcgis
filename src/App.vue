@@ -1,24 +1,24 @@
+<!-- src/App.vue -->
 <template>
   <div id="app">
-    <map-view />
+    <MapView />
   </div>
 </template>
 
 <script>
-import { defineComponent } from 'vue';
 import MapView from './components/MapView.vue';
 
-export default defineComponent({
+export default {
   name: 'App',
   components: {
     MapView,
   },
-});
+};
 </script>
 
 <style>
 #app {
-  height: 97vh;
-  width: 100%;
+  height: 100vh;
+  margin: 0;
 }
 </style>
