@@ -1,34 +1,25 @@
+<!-- src/components/MapView.vue -->
 <template>
   <div id="viewDiv"></div>
 </template>
 
 <script>
 import { defineComponent, onMounted } from 'vue';
-import Map from '@arcgis/core/Map';
-import MapView from '@arcgis/core/views/MapView';
-import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
-import Legend from '@arcgis/core/widgets/Legend';
-import * as geometryEngine from '@arcgis/core/geometry/geometryEngine';
 
 export default defineComponent({
   name: 'MapView',
   setup() {
     onMounted(async () => {
+      // Dynamically import ArcGIS modules
       const [Map, MapView, FeatureLayer, Legend, geometryEngine] = await Promise.all([
         import('@arcgis/core/Map'),
         import('@arcgis/core/views/MapView'),
         import('@arcgis/core/layers/FeatureLayer'),
         import('@arcgis/core/widgets/Legend'),
-        import('@arcgis/core/geometry/geometryEngine')
-      ]);
+        import('@arcgis/core/geometry/geometryEngine'),
+      ]).then((modules) => modules.map((module) => module.default || module));
 
-      // Inicia o mapa com os módulos importados
-      initMap(Map, MapView, FeatureLayer, Legend, geometryEngine);
-    });
-
-
-    function initMap() {
-      // Inicializa o mapa
+      // Initialize the map
       const map = new Map({
         basemap: 'gray-vector',
       });
@@ -36,56 +27,49 @@ export default defineComponent({
       const view = new MapView({
         container: 'viewDiv',
         map: map,
-        center: [-98, 39],
+        center: [-98, 39], // Center of the US
         zoom: 4,
       });
 
-      // URLs das camadas fornecidas
+      // URLs for the layers
       const camerasUrl =
         'https://services.arcgis.com/P3ePLMYs2RVChkJx/ArcGIS/rest/services/Traffic_Cameras/FeatureServer/0';
       const countiesUrl =
         'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Census_Counties/FeatureServer/0';
 
-      // Camada de câmeras
-      const camerasLayer = new FeatureLayer({
-        url: camerasUrl,
-        outFields: ['*'],
-      });
-
-      // Camada de condados
+      // Create the counties layer
       const countiesLayer = new FeatureLayer({
         url: countiesUrl,
         outFields: ['*'],
       });
 
-      // Adiciona a camada de condados ao mapa
+      // Add the counties layer to the map
       map.add(countiesLayer);
 
-      // Aguarda o carregamento das camadas
+      // Wait for the counties layer to load
       countiesLayer.when(() => {
-        camerasLayer.when(() => {
-          // Realiza a consulta das câmeras
-          const queryCameras = camerasLayer.createQuery();
-          queryCameras.where = '1=1';
-          queryCameras.returnGeometry = true;
-          queryCameras.outFields = ['*'];
-
-          camerasLayer.queryFeatures(queryCameras).then((cameraResults) => {
-            processCameraData(cameraResults.features);
-          });
-        });
-      });
-
-      function processCameraData(cameras) {
-        // Realiza a consulta dos condados
+        // Query the counties
         const queryCounties = countiesLayer.createQuery();
         queryCounties.returnGeometry = true;
         queryCounties.outFields = ['*'];
 
         countiesLayer.queryFeatures(queryCounties).then((countyResults) => {
-          calculateCameraCounts(cameras, countyResults.features);
+          // Now query the cameras
+          const camerasLayer = new FeatureLayer({
+            url: camerasUrl,
+            outFields: ['*'],
+          });
+
+          const queryCameras = camerasLayer.createQuery();
+          queryCameras.returnGeometry = true;
+          queryCameras.outFields = ['*'];
+
+          camerasLayer.queryFeatures(queryCameras).then((cameraResults) => {
+            // Process the data
+            calculateCameraCounts(cameraResults.features, countyResults.features);
+          });
         });
-      }
+      });
 
       function calculateCameraCounts(cameras, counties) {
         counties.forEach((county) => {
@@ -96,42 +80,17 @@ export default defineComponent({
             }
           });
           county.attributes.cameraCount = count;
-
-          // Log para confirmar que `cameraCount` está sendo atualizado
-          console.log(`Condado: ${county.attributes.NAME}, Câmeras: ${county.attributes.cameraCount}`);
         });
 
-        updateRenderer();
-      }
-
-      function updateRenderer() {
-        countiesLayer.renderer = getRenderer();
-        countiesLayer.refresh();
-
-        // Configura a legenda
-        view.ui.add(
-          new Legend({
-            view: view,
-            layerInfos: [
-              {
-                layer: countiesLayer,
-                title: 'Número de Câmeras por Condado',
-              },
-            ],
-          }),
-          'bottom-right'
-        );
-      }
-
-      function getRenderer() {
-        return {
+        // Update the counties layer with the new renderer
+        const renderer = {
           type: 'simple',
           symbol: {
             type: 'simple-fill',
             color: 'white',
             outline: {
               color: 'lightgray',
-              width: 0.2,
+              width: 0.5,
             },
           },
           visualVariables: [
@@ -148,9 +107,35 @@ export default defineComponent({
             },
           ],
         };
-      }
 
-    }
+        // Create a new FeatureLayer with the updated features
+        const updatedCountiesLayer = new FeatureLayer({
+          source: counties,
+          fields: countiesLayer.fields,
+          objectIdField: 'OBJECTID',
+          geometryType: 'polygon',
+          spatialReference: countiesLayer.spatialReference,
+          renderer: renderer,
+        });
+
+        // Replace the old counties layer with the updated one
+        map.remove(countiesLayer);
+        map.add(updatedCountiesLayer);
+
+        // Add a legend
+        const legend = new Legend({
+          view: view,
+          layerInfos: [
+            {
+              layer: updatedCountiesLayer,
+              title: 'Número de Câmeras por Condado',
+            },
+          ],
+        });
+
+        view.ui.add(legend, 'bottom-right');
+      }
+    });
   },
 });
 </script>
