@@ -1,22 +1,25 @@
-// vite.config.js
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { resolve } from 'path';
 
 export default defineConfig({
   plugins: [vue()],
   define: {
-    'process.env': {},
+    'process.env': {}
+  },
+  resolve: {
+    alias: {
+      '@arcgis/core': resolve(__dirname, 'node_modules/@arcgis/core')
+    }
   },
   build: {
     rollupOptions: {
+      external: ['@arcgis/core'],
       output: {
-        manualChunks: {
-          'arcgis-js-api': ['@arcgis/core'],
-        },
-      },
-    },
-  },
-  optimizeDeps: {
-    exclude: ['@arcgis/core'],
-  },
+        globals: {
+          '@arcgis/core': 'arcgisCore'
+        }
+      }
+    }
+  }
 });

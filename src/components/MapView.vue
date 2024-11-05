@@ -80,9 +80,14 @@ export default defineComponent({
             }
           });
           county.attributes.cameraCount = count;
+          console.log(`Condado: ${county.attributes.NAME}, Câmeras: ${county.attributes.cameraCount}`);
         });
 
-        // Update the counties layer with the new renderer
+        updateRenderer(counties);
+      }
+
+      function updateRenderer(counties) {
+        // Define renderer for choropleth visualization
         const renderer = {
           type: 'simple',
           symbol: {
