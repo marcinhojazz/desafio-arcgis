@@ -12,17 +12,17 @@ export default defineConfig({
       '@arcgis/core': resolve(__dirname, 'node_modules/@arcgis/core')
     }
   },
-  optimizeDeps: {
-    exclude: ['@arcgis/core']
-  },
   build: {
     rollupOptions: {
+      external: ['@arcgis/core'],
       output: {
+        globals: {
+          '@arcgis/core': 'arcgisCore'
+        },
         manualChunks: {
-          'arcgis': ['@arcgis/core']
+          arcgis: ['@arcgis/core']
         }
       }
-    },
-    chunkSizeWarningLimit: 1000  // Altera o limite para evitar warnings, caso queira
+    }
   }
 });
