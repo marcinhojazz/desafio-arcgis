@@ -18,9 +18,6 @@ export default defineConfig({
       output: {
         globals: {
           '@arcgis/core': 'arcgisCore'
-        },
-        manualChunks: {
-          arcgis: ['@arcgis/core']
         }
       }
     }
