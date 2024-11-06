@@ -27,7 +27,7 @@ export default defineComponent({
         map: map,
         center: [-98, 39],
         zoom: 4,
-        constraints: { minZoom: 4, maxZoom: 8 },
+        constraints: { minZoom: 2, maxZoom: 10 },
       });
 
       const camerasUrl = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/ArcGIS/rest/services/Traffic_Cameras/FeatureServer/0';
