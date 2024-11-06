@@ -1,4 +1,3 @@
-<!-- src/components/MapView.vue -->
 <template>
   <div id="viewDiv"></div>
 </template>
@@ -10,63 +9,56 @@ export default defineComponent({
   name: 'MapView',
   setup() {
     onMounted(async () => {
-      // Dynamically import ArcGIS modules
-      const [Map, MapView, FeatureLayer, Legend, geometryEngine] = await Promise.all([
+      const [Map, MapView, FeatureLayer, Legend, geometryEngine, projection] = await Promise.all([
         import('@arcgis/core/Map'),
         import('@arcgis/core/views/MapView'),
         import('@arcgis/core/layers/FeatureLayer'),
         import('@arcgis/core/widgets/Legend'),
         import('@arcgis/core/geometry/geometryEngine'),
+        import('@arcgis/core/geometry/projection'),
       ]).then((modules) => modules.map((module) => module.default || module));
 
-      // Initialize the map
-      const map = new Map({
-        basemap: 'gray-vector',
-      });
+      await projection.load();
+
+      const map = new Map({ basemap: 'gray-vector' });
 
       const view = new MapView({
         container: 'viewDiv',
         map: map,
-        center: [-98, 39], // Center of the US
+        center: [-98, 39],
         zoom: 4,
+        constraints: { minZoom: 4, maxZoom: 8 },
       });
 
-      // URLs for the layers
-      const camerasUrl =
-        'https://services.arcgis.com/P3ePLMYs2RVChkJx/ArcGIS/rest/services/Traffic_Cameras/FeatureServer/0';
-      const countiesUrl =
-        'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Census_Counties/FeatureServer/0';
+      const camerasUrl = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/ArcGIS/rest/services/Traffic_Cameras/FeatureServer/0';
+      const countiesUrl = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Census_Counties/FeatureServer/0';
 
-      // Create the counties layer
-      const countiesLayer = new FeatureLayer({
-        url: countiesUrl,
-        outFields: ['*'],
-      });
-
-      // Add the counties layer to the map
+      const countiesLayer = new FeatureLayer({ url: countiesUrl, outFields: ['*'] });
       map.add(countiesLayer);
 
-      // Wait for the counties layer to load
       countiesLayer.when(() => {
-        // Query the counties
         const queryCounties = countiesLayer.createQuery();
         queryCounties.returnGeometry = true;
         queryCounties.outFields = ['*'];
 
         countiesLayer.queryFeatures(queryCounties).then((countyResults) => {
-          // Now query the cameras
-          const camerasLayer = new FeatureLayer({
-            url: camerasUrl,
-            outFields: ['*'],
-          });
+          console.log(`Total counties: ${countyResults.features.length}`);
+          
+          const camerasLayer = new FeatureLayer({ url: camerasUrl, outFields: ['*'] });
 
-          const queryCameras = camerasLayer.createQuery();
-          queryCameras.returnGeometry = true;
-          queryCameras.outFields = ['*'];
+          camerasLayer.queryFeatures().then((cameraResults) => {
+            console.log(`Total cameras: ${cameraResults.features.length}`);
+            
+            // Verifica a referência espacial e projeta se necessário
+            const projectedCameras = cameraResults.features.map((camera) => {
+              const cameraGeometry = camera.geometry.spatialReference.wkid === countyResults.spatialReference.wkid
+                ? camera.geometry
+                : projection.project(camera.geometry, countyResults.spatialReference);
 
-          camerasLayer.queryFeatures(queryCameras).then((cameraResults) => {
-            // Process the data
-            calculateCameraCounts(cameraResults.features, countyResults.features);
+              return { ...camera, geometry: cameraGeometry };
+            });
+
+            calculateCameraCounts(projectedCameras, countyResults.features);
           });
         });
       });
@@ -80,23 +72,23 @@ export default defineComponent({
             }
           });
           county.attributes.cameraCount = count;
-          console.log(`Condado: ${county.attributes.NAME}, Câmeras: ${county.attributes.cameraCount}`);
+
+          // Log somente para condados com câmeras
+          if (count > 0) {
+            console.log(`County ${county.attributes.NAME} has ${count} cameras.`);
+          }
         });
 
         updateRenderer(counties);
       }
 
       function updateRenderer(counties) {
-        // Define renderer for choropleth visualization
         const renderer = {
           type: 'simple',
           symbol: {
             type: 'simple-fill',
             color: 'white',
-            outline: {
-              color: 'lightgray',
-              width: 0.5,
-            },
+            outline: { color: 'lightgray', width: 0.5 },
           },
           visualVariables: [
             {
@@ -113,29 +105,21 @@ export default defineComponent({
           ],
         };
 
-        // Create a new FeatureLayer with the updated features
         const updatedCountiesLayer = new FeatureLayer({
-          source: counties,
-          fields: countiesLayer.fields,
+          source: counties.map((county) => ({ geometry: county.geometry, attributes: county.attributes })),
+          fields: countiesLayer.fields.concat([{ name: 'cameraCount', type: 'integer' }]),
           objectIdField: 'OBJECTID',
           geometryType: 'polygon',
           spatialReference: countiesLayer.spatialReference,
-          renderer: renderer,
+          renderer,
         });
 
-        // Replace the old counties layer with the updated one
         map.remove(countiesLayer);
         map.add(updatedCountiesLayer);
 
-        // Add a legend
         const legend = new Legend({
-          view: view,
-          layerInfos: [
-            {
-              layer: updatedCountiesLayer,
-              title: 'Número de Câmeras por Condado',
-            },
-          ],
+          view,
+          layerInfos: [{ layer: updatedCountiesLayer, title: 'Número de Câmeras por Condado' }],
         });
 
         view.ui.add(legend, 'bottom-right');
