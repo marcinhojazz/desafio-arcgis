@@ -1,6 +1,12 @@
 <template>
   <div id="viewDiv"></div>
 
+  <!-- Barra de consulta para o nome da câmera -->
+  <div class="query-bar">
+    <input v-model="cameraName" type="text" placeholder="Digite o nome da câmera" />
+    <button @click="applyAttributeQuery">Consultar</button>
+  </div>
+
   <!-- Descrição do mapa -->
   <div class="map-description" v-if="!isLoading">
     <p>Mapa coroplético mostrando a análise de câmeras de tráfego por condado nos EUA</p>
@@ -20,9 +26,49 @@ export default defineComponent({
   name: 'MapView',
   setup() {
     const isLoading = ref(true);
+    const cameraName = ref('');
+    let map, view, countiesLayer, cameraLayer, projection;
+
+    // Função de consulta com tentativa de reexecução
+    const applyAttributeQuery = async () => {
+      if (!cameraLayer || cameraLayer.loadStatus !== 'loaded') {
+        console.warn("A camada de câmeras ainda não está carregada.");
+        return;
+      }
+
+      isLoading.value = true;
+      try {
+        const whereClause = cameraName.value
+          ? `NAME LIKE '%${cameraName.value.replace(/'/g, "''")}%'`
+          : '1=1';
+        cameraLayer.definitionExpression = whereClause;
+
+        const cameraResults = await cameraLayer.queryFeatures({
+          where: whereClause,
+          returnGeometry: true,
+          outFields: ['OBJECTID'],
+        });
+
+        if (cameraResults.features.length === 0) {
+          console.warn("Nenhuma câmera encontrada com esse critério.");
+        }
+
+        const projectedCameras = cameraResults.features.map((camera) => {
+          return camera.geometry.spatialReference.wkid === countiesLayer.spatialReference.wkid
+            ? camera
+            : { ...camera, geometry: projection.project(camera.geometry, countiesLayer.spatialReference) };
+        });
+
+        calculateCameraCounts(projectedCameras, countiesLayer.features);
+      } catch (error) {
+        console.error("Erro ao aplicar a consulta de atributos:", error.message || error);
+      } finally {
+        isLoading.value = false;
+      }
+    };
 
     onMounted(async () => {
-      const [Map, MapView, FeatureLayer, Legend, geometryEngine, projection] = await Promise.all([
+      const [Map, MapView, FeatureLayer, Legend, geometryEngine, proj] = await Promise.all([
         import('@arcgis/core/Map'),
         import('@arcgis/core/views/MapView'),
         import('@arcgis/core/layers/FeatureLayer'),
@@ -31,11 +77,13 @@ export default defineComponent({
         import('@arcgis/core/geometry/projection'),
       ]).then((modules) => modules.map((module) => module.default || module));
 
+      // Atribui a projeção para uso global
+      projection = proj;
       await projection.load();
 
-      const map = new Map({ basemap: 'gray-vector' });
+      map = new Map({ basemap: 'gray-vector' });
 
-      const view = new MapView({
+      view = new MapView({
         container: 'viewDiv',
         map: map,
         center: [-98, 39],
@@ -46,52 +94,51 @@ export default defineComponent({
       const camerasUrl = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/ArcGIS/rest/services/Traffic_Cameras/FeatureServer/0';
       const countiesUrl = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Census_Counties/FeatureServer/0';
 
-      const countiesLayer = new FeatureLayer({
+      countiesLayer = new FeatureLayer({
         url: countiesUrl,
         outFields: ['OBJECTID', 'NAME'],
       });
       map.add(countiesLayer);
 
-      // Carrega condados e câmeras em paralelo
-      const [countyResults, cameraResults] = await Promise.all([
-        countiesLayer.queryFeatures({
-          where: '1=1',
-          returnGeometry: true,
-          outFields: ['OBJECTID', 'NAME'],
-        }),
-        new FeatureLayer({ url: camerasUrl, outFields: ['OBJECTID'] }).queryFeatures({
-          where: '1=1',
-          returnGeometry: true,
-          spatialRel: 'intersects',
-          geometry: view.extent,
-        }),
-      ]);
+      cameraLayer = new FeatureLayer({
+        url: camerasUrl,
+        outFields: ['OBJECTID'],
+        popupTemplate: {
+          title: 'Câmera de Tráfego',
+          content: [
+            {
+              type: "fields",
+              fieldInfos: [
+                { fieldName: "OBJECTID", label: "ID da Câmera" },
+              ]
+            }
+          ]
+        },
+        definitionExpression: '1=1', // Inicialmente sem filtros
+      });
+      map.add(cameraLayer);
 
-      // Verifique se os dados estão corretos
-      console.log("County Results:", countyResults);
-      console.log("Camera Results:", cameraResults);
+      // Aguarda o carregamento completo da camada antes de aplicar a consulta
+      cameraLayer.when(() => {
+        applyAttributeQuery();
+      }).catch((error) => {
+        console.error("Erro ao carregar a camada de câmeras:", error);
+        isLoading.value = false;
+      });
 
-      const projectedCameras = Array.isArray(cameraResults.features)
-        ? cameraResults.features.map((camera) => {
-            return camera.geometry.spatialReference.wkid === countyResults.spatialReference.wkid
-              ? camera
-              : { ...camera, geometry: projection.project(camera.geometry, countyResults.spatialReference) };
-          })
-        : [];
+      const countyResults = await countiesLayer.queryFeatures({
+        where: '1=1',
+        returnGeometry: true,
+        outFields: ['OBJECTID', 'NAME'],
+      });
 
-      calculateCameraCounts(projectedCameras, countyResults.features);
+      const counties = countyResults.features;
 
       function calculateCameraCounts(cameras, counties) {
-        // Verifique se 'counties' é um array
-        if (!Array.isArray(counties) || !Array.isArray(cameras)) {
-          console.error("Dados inválidos para counties ou cameras.");
-          return;
-        }
-
         counties.forEach((county) => {
           let count = 0;
           cameras.forEach((camera) => {
-            if (county.geometry && camera.geometry && geometryEngine.contains(county.geometry, camera.geometry)) {
+            if (geometryEngine.contains(county.geometry, camera.geometry)) {
               count++;
             }
           });
@@ -124,84 +171,64 @@ export default defineComponent({
           ],
         };
 
-        const updatedCountiesLayer = new FeatureLayer({
-          source: counties.map((county) => ({ geometry: county.geometry, attributes: county.attributes })),
-          fields: countiesLayer.fields.concat([{ name: 'cameraCount', type: 'integer' }]),
-          objectIdField: 'OBJECTID',
-          geometryType: 'polygon',
-          spatialReference: countiesLayer.spatialReference,
-          renderer,
-        });
-
-        map.remove(countiesLayer);
-        map.add(updatedCountiesLayer);
+        countiesLayer.renderer = renderer;
 
         const legend = new Legend({
           view,
-          layerInfos: [{ layer: updatedCountiesLayer, title: 'Número de Câmeras por Condado' }],
+          layerInfos: [{ layer: countiesLayer, title: 'Número de Câmeras por Condado' }],
         });
-
         view.ui.add(legend, 'bottom-right');
-
-        // Remover tela de carregamento
         isLoading.value = false;
       }
     });
 
     return {
       isLoading,
+      cameraName,
+      applyAttributeQuery,
     };
   },
 });
 </script>
 
-<style>
+<style scoped>
 #viewDiv {
   position: absolute;
-  top: 0;
+  top: 50px;
   left: 0;
-  height: 100vh;
+  height: calc(100vh - 50px);
   width: 100vw;
-  overflow: hidden;
-}
-
-body {
-  margin: 0;
-  overflow: hidden;
 }
 
 .map-description {
   position: absolute;
-  top: 1rem;
-  left: 4rem;
-  z-index: 1000;
+  top: 60px;
+  left: 20px;
   background-color: rgba(0, 0, 0, 0.6);
   color: white;
   padding: 8px 12px;
   border-radius: 4px;
   font-size: 14px;
+}
 
-  
+.query-bar {
+  position: absolute;
+  top: 10px;
+  left: 20px;
+  z-index: 1000;
+  display: flex;
 }
 
 .loading-overlay {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 9999;
   width: 100vw;
   height: 100vh;
   background-color: rgba(37, 0, 105, 0.4);
   display: flex;
-  flex-direction: column;
   justify-content: center;
   align-items: center;
-
-  p {
-    color: white;
-    font-size: 1.5rem;
-    font-weight: 700;
-  }
 }
 
 .spinner {
@@ -215,30 +242,7 @@ body {
 }
 
 @keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
-
-@media screen and (max-width: 768px) {
-    .map-description {
-      top: 0;
-      left: 0;
-      padding: 12px;
-      text-align: center;
-      margin: 16px 3.5rem 0 3.5rem;
-    }
-
-    .loading-overlay {
-      p {
-        font-size: 1.2rem;
-        text-align: center;
-      }
-    }
-  }
-
-
 </style>
