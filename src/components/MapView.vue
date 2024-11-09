@@ -388,40 +388,52 @@ export default defineComponent({
 
 <template>
   <div>
+    <!-- Controle para o accordion com checkbox -->
+    <input type="checkbox" id="accordion-toggle" class="accordion-checkbox" />
+    
     <div class="search-controls">
       <div class="form-group">
-        <label for="state">Estado:</label>
-        <select v-model="queryParams.state" id="state">
-          <option value="">Todos</option>
-          <option v-for="state in states" :key="state" :value="state">
-            {{ state }}
-          </option>
-        </select>
+        <div class="content-bottom">
+          <h2>Pesquisa</h2>
+          <!-- Label associado ao checkbox para controlar o accordion -->
+          <label for="accordion-toggle" class="button-accordion">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+              <path fill="currentColor" d="m12 16.175l3.9-3.875q.275-.275.688-.288t.712.288q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213l-4.6-4.6q-.275-.275-.288-.687T6.7 12.3q.275-.275.7-.275t.7.275zm0-6L15.9 6.3q.275-.275.688-.287t.712.287q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213L6.7 7.7q-.275-.275-.288-.687T6.7 6.3q.275-.275.7-.275t.7.275z"/>
+            </svg>
+          </label>
+        </div>
+        
+        <!-- Conteúdo do accordion, controlado pelo checkbox -->
+        <div class="accordion-content">
+          <label for="state">Estado:</label>
+          <select v-model="queryParams.state" id="state">
+            <option value="">Todos</option>
+            <option v-for="state in states" :key="state" :value="state">
+              {{ state }}
+            </option>
+          </select>
+          
+          <label for="county">Condado:</label>
+          <input
+            type="text"
+            v-model="queryParams.name"
+            id="county"
+            placeholder="Nome do condado"
+          />
+          
+          <label for="minCameras">Mínimo de câmeras:</label>
+          <input
+            type="number"
+            v-model.number="queryParams.minCameras"
+            id="minCameras"
+            min="0"
+          />
+          
+          <button @click="executeQuery" :disabled="isLoading">
+            {{ isLoading ? 'Pesquisando...' : 'Pesquisar' }}
+          </button>
+        </div>
       </div>
-
-      <div class="form-group">
-        <label for="county">Condado:</label>
-        <input
-          type="text"
-          v-model="queryParams.name"
-          id="county"
-          placeholder="Nome do condado"
-        />
-      </div>
-
-      <div class="form-group">
-        <label for="minCameras">Mínimo de câmeras:</label>
-        <input
-          type="number"
-          v-model.number="queryParams.minCameras"
-          id="minCameras"
-          min="0"
-        />
-      </div>
-
-      <button @click="executeQuery" :disabled="isLoading">
-        {{ isLoading ? 'Pesquisando...' : 'Pesquisar' }}
-      </button>
     </div>
 
     <!-- Div para exibir o mapa -->
