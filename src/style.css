@@ -1,0 +1,65 @@
+/* src/style.css */
+
+/* Global Styles */
+
+/* Styles for MapViewComponent */
+.search-controls {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 1;
+  background: white;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.form-group {
+  margin-bottom: 10px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+button {
+  width: 100%;
+  padding: 8px;
+  background: #4a90e2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #ccc;
+}
+
+.results-info {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  z-index: 1;
+  background: white;
+  padding: 10px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Map View Styles */
+#viewDiv {
+  width: 100%;
+  height: 600px;
+}
+
+/* You can include other global styles here */
