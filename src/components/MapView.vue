@@ -316,6 +316,10 @@ export default defineComponent({
           map: map,
           center: [-98, 39],
           zoom: 4,
+          constraints: {
+            minZoom: 3,
+            maxZoom: 9,
+          },
         });
 
         // Inicializa a camada de condados
