@@ -5,7 +5,6 @@ import MapView from '@arcgis/core/views/MapView';
 import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
 import Legend from '@arcgis/core/widgets/Legend';
 import * as geometryEngine from '@arcgis/core/geometry/geometryEngine';
-import * as projection from '@arcgis/core/geometry/projection';
 
 export default defineComponent({
   name: 'MapViewComponent',
@@ -20,7 +19,7 @@ export default defineComponent({
       minCameras: 0,
     });
 
-    let map, view, countiesLayer, cameraLayer, legend;
+    let map, view, countiesLayer, cameraLayer, legend, clientCountiesLayer;
     let existingFields = [];
 
     const buildWhereClause = () => {
@@ -187,11 +186,12 @@ export default defineComponent({
         const countyWhereClause = buildWhereClause();
 
         // Consultar os condados com base nos parâmetros
-        const countyResults = await countiesLayer.queryFeatures({
-          where: countyWhereClause,
-          returnGeometry: true,
-          outFields: ['*'],
-        });
+        const countyQuery = countiesLayer.createQuery();
+        countyQuery.where = countyWhereClause;
+        countyQuery.returnGeometry = true;
+        countyQuery.outFields = ['OBJECTID', 'NAME', 'STATE_NAME'];
+
+        const countyResults = await countiesLayer.queryFeatures(countyQuery);
 
         if (countyResults.features.length === 0) {
           erros.value.push({
@@ -202,65 +202,69 @@ export default defineComponent({
           return;
         }
 
-        if (!projection.isLoaded()) {
-          await projection.load();
-        }
-
-        // Projetar as geometrias das câmeras, se necessário
-        let cameraFeatures = await cameraLayer.queryFeatures({
-          where: '1=1',
-          returnGeometry: true,
-          outFields: ['*'],
-        });
-
-        if (cameraFeatures.features.length === 0) {
+        // Limitar o número de condados para evitar sobrecarga no cliente
+        if (countyResults.features.length > 50) {
           erros.value.push({
             tipo: 'AVISO',
-            mensagem: 'Nenhuma câmera encontrada.',
+            mensagem:
+              'Muitos condados selecionados. Por favor, refine sua pesquisa.',
           });
+          isLoading.value = false;
+          return;
         }
 
-        const cameras = cameraFeatures.features.map((camera) => {
-          if (
-            camera.geometry.spatialReference.wkid !==
-            countiesLayer.spatialReference.wkid
-          ) {
-            camera.geometry = projection.project(
-              camera.geometry,
-              countiesLayer.spatialReference
-            );
-          }
-          return camera;
-        });
-
-        // Mapear as câmeras para os condados
-        const updatedCounties = countyResults.features.map((county) => {
-          const count = cameras.filter((camera) =>
-            geometryEngine.contains(county.geometry, camera.geometry)
-          ).length;
-
-          return {
-            geometry: county.geometry,
-            attributes: {
-              ...county.attributes,
-              cameraCount: count,
-            },
-          };
-        });
-
-        // Filtrar os condados pelo número mínimo de câmeras
-        const filteredCounties = updatedCounties.filter(
-          (county) => county.attributes.cameraCount >= queryParams.minCameras
+        // Combinar as geometrias dos condados em uma única geometria
+        const combinedGeometry = geometryEngine.union(
+          countyResults.features.map((f) => f.geometry)
         );
 
-        // Remover a camada de condados existente
-        if (map.findLayerById('countiesLayer')) {
-          map.remove(map.findLayerById('countiesLayer'));
+        // Consultar as câmeras dentro dos condados selecionados
+        const cameraQuery = cameraLayer.createQuery();
+        cameraQuery.geometry = combinedGeometry;
+        cameraQuery.spatialRelationship = 'intersects';
+        cameraQuery.returnGeometry = true; // Precisamos da geometria para a associação espacial
+        cameraQuery.outFields = ['OBJECTID'];
+        const cameraResults = await cameraLayer.queryFeatures(cameraQuery);
+
+        totalCameras.value = cameraResults.features.length;
+
+        // Mapear as câmeras para os condados
+        const cameraCountsByCounty = {};
+        for (const county of countyResults.features) {
+          cameraCountsByCounty[county.attributes.OBJECTID] = 0;
         }
 
-        // Criar uma nova camada de condados com os recursos atualizados
-        countiesLayer = new FeatureLayer({
-          id: 'countiesLayer',
+        for (const camera of cameraResults.features) {
+          // Encontrar o condado que contém a câmera
+          for (const county of countyResults.features) {
+            if (geometryEngine.contains(county.geometry, camera.geometry)) {
+              cameraCountsByCounty[county.attributes.OBJECTID]++;
+              break;
+            }
+          }
+        }
+
+        // Atualizar atributos dos condados com a contagem de câmeras
+        const updatedCounties = countyResults.features.map((county) => {
+          const count = cameraCountsByCounty[county.attributes.OBJECTID] || 0;
+          county.attributes.cameraCount = count;
+          return county;
+        });
+
+        // Filtrar condados pelo mínimo de câmeras
+        const filteredCounties = updatedCounties.filter(
+          (county) =>
+            county.attributes.cameraCount >= (queryParams.minCameras || 0)
+        );
+
+        // Remover camada de condados existente
+        if (clientCountiesLayer) {
+          map.remove(clientCountiesLayer);
+        }
+
+        // Criar nova camada de condados
+        clientCountiesLayer = new FeatureLayer({
+          id: 'clientCountiesLayer',
           source: filteredCounties,
           fields: [
             ...existingFields,
@@ -275,21 +279,18 @@ export default defineComponent({
           spatialReference: countiesLayer.spatialReference,
         });
 
-        map.add(countiesLayer);
+        map.add(clientCountiesLayer);
 
-        updateRenderer(countiesLayer);
+        updateRenderer(clientCountiesLayer);
         await focusOnHotspots(filteredCounties);
 
-        // Atualizar a legenda para referenciar a nova camada
+        // Atualizar a legenda
         legend.layerInfos = [
           {
-            layer: countiesLayer,
+            layer: clientCountiesLayer,
             title: 'Contagem de Câmeras por Condado',
           },
         ];
-
-        totalCameras.value = cameras.length;
-
       } catch (error) {
         erros.value.push({
           tipo: 'ERRO',
@@ -334,9 +335,6 @@ export default defineComponent({
           outFields: ['*'],
         });
 
-        // Adiciona a camada de condados ao mapa
-        map.add(countiesLayer);
-
         // Aguarda o carregamento das camadas
         await countiesLayer.load();
         existingFields = countiesLayer.fields;
@@ -345,22 +343,22 @@ export default defineComponent({
         // Adiciona a legenda
         legend = new Legend({
           view: view,
-          layerInfos: [
-            {
-              layer: countiesLayer,
-              title: 'Contagem de Câmeras por Condado',
-            },
-          ],
+          layerInfos: [],
         });
         view.ui.add(legend, 'bottom-left');
 
         // Preenche a lista de estados
         const stateQuery = countiesLayer.createQuery();
-        stateQuery.returnDistinctValues = true;
+        stateQuery.returnGeometry = false;
         stateQuery.outFields = ['STATE_NAME'];
+        stateQuery.returnDistinctValues = true;
+        stateQuery.orderByFields = ['STATE_NAME'];
+
         const stateResults = await countiesLayer.queryFeatures(stateQuery);
+
         states.value = stateResults.features
           .map((f) => f.attributes.STATE_NAME)
+          .filter((value, index, self) => self.indexOf(value) === index)
           .sort();
 
         // Executa a consulta inicial
@@ -434,7 +432,7 @@ export default defineComponent({
           />
           
           <button @click="executeQuery" :disabled="isLoading">
-            {{ isLoading ? 'Pesquisando...' : 'Pesquisar' }}
+            {{ isLoading ? 'Pesquisando, aguarde...' : 'Pesquisar' }}
           </button>
         </div>
       </div>
