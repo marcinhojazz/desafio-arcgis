@@ -13,10 +13,13 @@ export default defineComponent({
     const totalCameras = ref(0);
     const states = ref([]);
     const erros = ref([]);
+
+    // Parâmetros de consulta
     const queryParams = reactive({
       name: '',
       state: '',
       minCameras: 0,
+      cameraLocation: '',
     });
 
     let map, view, countiesLayer, cameraLayer, legend, clientCountiesLayer;
@@ -24,37 +27,31 @@ export default defineComponent({
 
     const buildWhereClause = () => {
       const conditions = [];
-
       if (queryParams.name) {
         conditions.push(
           `NAME LIKE '%${queryParams.name.replace(/'/g, "''")}%'`
         );
       }
-
       if (queryParams.state) {
         conditions.push(
           `STATE_NAME = '${queryParams.state.replace(/'/g, "''")}'`
         );
       }
-
       return conditions.length ? conditions.join(' AND ') : '1=1';
     };
 
     const focusOnHotspots = async (counties) => {
       if (!counties || counties.length === 0) return;
-
       const sortedCounties = [...counties].sort(
         (a, b) =>
           (b.attributes.cameraCount || 0) - (a.attributes.cameraCount || 0)
       );
-
       const topCounties = sortedCounties.slice(0, 5);
 
       // Filtrar condados com geometria válida
       const validCounties = topCounties.filter(
         (county) => county.geometry && county.geometry.extent
       );
-
       if (validCounties.length === 0) return;
 
       const combinedExtent = validCounties.reduce((extent, county) => {
@@ -170,6 +167,18 @@ export default defineComponent({
       }
     };
 
+    const buildCameraWhereClause = () => {
+      const conditions = [];
+
+      if (queryParams.cameraLocation) {
+        conditions.push(
+          `location LIKE '%${queryParams.cameraLocation.replace(/'/g, "''")}%'`
+        );
+      }
+
+      return conditions.length ? conditions.join(' AND ') : '1=1';
+    };
+
     const executeQuery = async () => {
       if (!cameraLayer || !countiesLayer) {
         erros.value.push({
@@ -184,6 +193,9 @@ export default defineComponent({
 
       try {
         const countyWhereClause = buildWhereClause();
+
+         // Aplicar consulta por atributos na camada de câmeras
+        const cameraWhereClause = buildCameraWhereClause();
 
         // Consultar os condados com base nos parâmetros
         const countyQuery = countiesLayer.createQuery();
@@ -221,9 +233,11 @@ export default defineComponent({
         // Consultar as câmeras dentro dos condados selecionados
         const cameraQuery = cameraLayer.createQuery();
         cameraQuery.geometry = combinedGeometry;
+        cameraQuery.where = cameraWhereClause;
         cameraQuery.spatialRelationship = 'intersects';
-        cameraQuery.returnGeometry = true; // Precisamos da geometria para a associação espacial
-        cameraQuery.outFields = ['OBJECTID'];
+        cameraQuery.returnGeometry = true;
+        cameraQuery.outFields = ['OBJECTID', 'location', 'county', 'feedID'];
+
         const cameraResults = await cameraLayer.queryFeatures(cameraQuery);
 
         totalCameras.value = cameraResults.features.length;
@@ -282,7 +296,6 @@ export default defineComponent({
         map.add(clientCountiesLayer);
 
         updateRenderer(clientCountiesLayer);
-        await focusOnHotspots(filteredCounties);
 
         // Atualizar a legenda
         legend.layerInfos = [
@@ -291,6 +304,9 @@ export default defineComponent({
             title: 'Contagem de Câmeras por Condado',
           },
         ];
+
+        await focusOnHotspots(filteredCounties);
+
       } catch (error) {
         erros.value.push({
           tipo: 'ERRO',
@@ -430,8 +446,18 @@ export default defineComponent({
             id="minCameras"
             min="0"
           />
+
+          <!-- campo para filtrar câmeras -->
+          <label for="cameraLocation">Localização da Câmera:</label>
+          <input
+            type="text"
+            v-model="queryParams.cameraLocation"
+            id="cameraLocation"
+            placeholder="Localização da câmera"
+          />
+
           
-          <button @click="executeQuery" :disabled="isLoading">
+          <button class="searchButton" @click="executeQuery" :disabled="isLoading">
             {{ isLoading ? 'Pesquisando, aguarde...' : 'Pesquisar' }}
           </button>
         </div>
