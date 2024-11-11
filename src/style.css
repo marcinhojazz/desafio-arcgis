@@ -58,6 +58,10 @@ button:disabled {
   background: #ccc;
 }
 
+#cameraLocation {
+  margin-bottom: 32px;
+}
+
 .results-info {
   position: absolute;
   bottom: 20px;
